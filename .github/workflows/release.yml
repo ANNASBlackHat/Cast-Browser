@@ -1,0 +1,129 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to publish a release for (e.g. v1.0.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Resolve version from tag
+        id: version
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          case "$TAG" in
+            v*) VERSION="${TAG#v}" ;;
+            *)  echo "Tag must start with 'v' (got '$TAG')" >&2; exit 1 ;;
+          esac
+          # versionCode must strictly increase for Play/in-place upgrades. Derive it from the
+          # tag so a rebuild of the same tag is idempotent but a new tag always wins.
+          VERSION_CODE="${VERSION//[^0-9]/}"
+          VERSION_CODE="${VERSION_CODE:-1}"
+          echo "tag=$TAG"        >> "$GITHUB_OUTPUT"
+          echo "name=$VERSION"   >> "$GITHUB_OUTPUT"
+          echo "code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+
+      - name: Decode release keystore
+        # RELEASE_KEYSTORE is a base64-encoded .jks. Without it we fall back to the debug key,
+        # which is fine for a dry run but produces an APK users cannot upgrade in place.
+        id: keystore
+        env:
+          RELEASE_KEYSTORE: ${{ secrets.RELEASE_KEYSTORE }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RELEASE_KEYSTORE:-}" ]; then
+            echo "::warning::RELEASE_KEYSTORE secret not set - APK will be signed with the debug key."
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          mkdir -p "$RUNNER_TEMP/keystore"
+          printf '%s' "$RELEASE_KEYSTORE" | base64 --decode > "$RUNNER_TEMP/keystore/release.jks"
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+          echo "path=$RUNNER_TEMP/keystore/release.jks" >> "$GITHUB_OUTPUT"
+
+      - name: Run unit tests
+        run: ./gradlew testDebugUnitTest --stacktrace
+
+      - name: Build signed release APK
+        env:
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+          RELEASE_STORE_FILE: ${{ steps.keystore.outputs.path }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          ./gradlew assembleRelease --stacktrace \
+            -PVERSION_NAME="$VERSION_NAME" \
+            -PVERSION_CODE="$VERSION_CODE" \
+            -PRELEASE_STORE_FILE="$RELEASE_STORE_FILE" \
+            -PRELEASE_STORE_PASSWORD="$RELEASE_STORE_PASSWORD" \
+            -PRELEASE_KEY_ALIAS="$RELEASE_KEY_ALIAS" \
+            -PRELEASE_KEY_PASSWORD="$RELEASE_KEY_PASSWORD"
+
+      - name: Verify APK signature
+        # Fails the release if the APK is unsigned or signed with a throwaway key.
+        run: |
+          set -euo pipefail
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs \
+            app/build/outputs/apk/release/app-release.apk
+
+      - name: Upload release notes artifact
+        run: ls -lh app/build/outputs/apk/release/app-release.apk
+
+      - name: Publish to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: CastBrowser ${{ steps.version.outputs.name }}
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.name, '-') }}
+          files: app/build/outputs/apk/release/app-release.apk
+          body: |
+            ## CastBrowser ${{ steps.version.outputs.name }}
+
+            Android browser that detects video streams on a page and casts them to a TV on your LAN.
+
+            **Install:** download the APK, allow installs from your file manager, and open it.
+            Android 8.0 (API 26) or newer. Casting requires the phone and TV on the same Wi-Fi.
+
+            | | |
+            | --- | --- |
+            | Application ID | `com.castbrowser.app` |
+            | Version code | ${{ steps.version.outputs.code }} |
+            | Min SDK | 26 (Android 8.0) |
+            | Target SDK | 35 (Android 15) |
+
+            <details>
+            <summary>Build verification</summary>
+
+            ```
+            ${{ steps.version.outputs.name }} · versionCode ${{ steps.version.outputs.code }}
+            ```
+
+            </details>
