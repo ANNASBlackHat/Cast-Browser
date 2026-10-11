@@ -1,0 +1,57 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Screen / TV Frame -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#E0E1DD"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M32,32 L76,32 A6,6 0 0,1 82,38 L82,66 A6,6 0 0,1 76,72 L32,72" />
+
+    <!-- Screen Stand / Base -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#778DA9"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:pathData="M48,76 L60,76" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#778DA9"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:pathData="M54,72 L54,76" />
+
+    <!-- Cast Waves (Glowing Cyan / Electric Blue) -->
+    <!-- Wave 1: Dot -->
+    <path
+        android:fillColor="#00B4D8"
+        android:pathData="M26,72 A3,3 0 1,1 26,66 A3,3 0 1,1 26,72" />
+
+    <!-- Wave 2: Small Arc -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#00B4D8"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:pathData="M26,58 A14,14 0 0,1 40,72" />
+
+    <!-- Wave 3: Medium Arc -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#48CAE4"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:pathData="M26,48 A24,24 0 0,1 50,72" />
+
+    <!-- Play Symbol in center of TV (Vibrant Blue accent) -->
+    <path
+        android:fillColor="#90E0EF"
+        android:pathData="M54,46 L66,53 L54,60 Z" />
+
+</vector>
