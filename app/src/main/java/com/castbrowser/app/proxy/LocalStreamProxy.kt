@@ -5,16 +5,15 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import java.io.InputStream
-import java.net.URLDecoder
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 class LocalStreamProxy(
     private val port: Int = 8888,
     private val client: OkHttpClient = OkHttpClient()
 ) : NanoHTTPD(port) {
 
-    private var activeSessionToken: String = UUID.randomUUID().toString()
-    private val activeStreams = mutableMapOf<String, Map<String, String>>() // token -> headers
+    private val activeStreams = ConcurrentHashMap<String, Map<String, String>>() // token -> headers
 
     fun registerStream(headers: Map<String, String>, cookies: String? = null): String {
         val token = UUID.randomUUID().toString()
@@ -29,6 +28,8 @@ class LocalStreamProxy(
     fun unregisterStream(token: String) {
         activeStreams.remove(token)
     }
+
+    fun hasStream(token: String): Boolean = activeStreams.containsKey(token)
 
     override fun serve(session: IHTTPSession): Response {
         val uri = session.uri
@@ -51,16 +52,17 @@ class LocalStreamProxy(
             val token = params["token"]
             val rawTargetUrl = params["url"]
 
-            if (rawTargetUrl == null) {
+            // H2 Fix: Enforce token presence and validity to prevent SSRF
+            if (token.isNullOrBlank() || !activeStreams.containsKey(token)) {
+                return newFixedLengthResponse(Response.Status.FORBIDDEN, MIME_PLAINTEXT, "Invalid or missing token")
+            }
+
+            if (rawTargetUrl.isNullOrBlank()) {
                 return newFixedLengthResponse(Response.Status.BAD_REQUEST, MIME_PLAINTEXT, "Missing target URL")
             }
 
-            val targetUrl = try {
-                URLDecoder.decode(rawTargetUrl, "UTF-8")
-            } catch (_: Exception) {
-                rawTargetUrl
-            }
-
+            // C4 Fix: Do NOT call URLDecoder.decode! NanoHTTPD already percent-decodes session.parms.
+            val targetUrl = rawTargetUrl
             val storedHeaders = activeStreams[token] ?: emptyMap()
 
             return try {
@@ -82,10 +84,10 @@ class LocalStreamProxy(
 
                 val contentType = upstreamResponse.header("Content-Type") ?: "video/mp4"
 
-                // Check if HLS playlist to rewrite URLs
-                if (contentType.contains("vnd.apple.mpegurl") ||
-                    contentType.contains("x-mpegurl") ||
-                    targetUrl.substringBefore("?").endsWith(".m3u8")
+                // M4 Fix: Case-insensitive check for HLS playlist to rewrite URLs
+                if (contentType.contains("vnd.apple.mpegurl", ignoreCase = true) ||
+                    contentType.contains("x-mpegurl", ignoreCase = true) ||
+                    targetUrl.substringBefore("?").endsWith(".m3u8", ignoreCase = true)
                 ) {
                     val playlistText = upstreamBody.string()
                     val hostPort = session.headers["host"] ?: "127.0.0.1:$port"
@@ -93,7 +95,7 @@ class LocalStreamProxy(
                         playlistContent = playlistText,
                         baseMediaUrl = targetUrl,
                         proxyHostPort = hostPort,
-                        sessionToken = token ?: ""
+                        sessionToken = token
                     )
 
                     val resp = newFixedLengthResponse(
@@ -107,16 +109,13 @@ class LocalStreamProxy(
 
                 // Handle binary media stream (with Range 206 support)
                 val status = if (upstreamResponse.code == 206) Response.Status.PARTIAL_CONTENT else Response.Status.OK
-                val contentLength = upstreamBody.contentLength()
                 val stream: InputStream = upstreamBody.byteStream()
 
+                // M3 Fix: Do not add Content-Length to chunked response (violates RFC 7230 section 3.3.2)
                 val resp = newChunkedResponse(status, contentType, stream)
                 responseHeaders.forEach { (k, v) -> resp.addHeader(k, v) }
 
                 upstreamResponse.header("Content-Range")?.let { resp.addHeader("Content-Range", it) }
-                if (contentLength > 0) {
-                    resp.addHeader("Content-Length", contentLength.toString())
-                }
                 resp.addHeader("Accept-Ranges", "bytes")
 
                 resp

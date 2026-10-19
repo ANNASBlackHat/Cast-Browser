@@ -11,6 +11,7 @@ import com.castbrowser.app.detect.StreamProbeService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import java.util.LinkedHashMap
 
 class WebViewPool(
@@ -41,7 +42,13 @@ class WebViewPool(
         onTitleUpdate: (String) -> Unit,
         onUrlUpdate: (String) -> Unit
     ): WebView {
-        activeViews[tabId]?.let { return it }
+        activeViews[tabId]?.let { existing ->
+            // C3 Fix: If a new URL was requested (e.g. from Home or History), load it
+            if (initialUrl.isNotBlank() && existing.url != initialUrl && initialUrl != "about:blank") {
+                existing.loadUrl(initialUrl)
+            }
+            return existing
+        }
 
         val webView = WebView(context).apply {
             layoutParams = ViewGroup.LayoutParams(
@@ -112,34 +119,40 @@ class WebViewPool(
 
     fun removeTab(tabId: String) {
         val view = activeViews.remove(tabId)
+        (view?.webViewClient as? CastWebViewClient)?.destroy()
         view?.destroy()
         stateManager.deleteTabFiles(tabId)
 
-        val current = _tabStreams.value.toMutableMap()
-        current.remove(tabId)
-        _tabStreams.value = current
+        _tabStreams.update { current ->
+            current.toMutableMap().apply { remove(tabId) }
+        }
     }
 
     private fun evictWebView(tabId: String, webView: WebView) {
         val bundle = Bundle()
         webView.saveState(bundle)
         stateManager.saveTabBundle(tabId, bundle)
+        (webView.webViewClient as? CastWebViewClient)?.destroy()
         webView.destroy()
     }
 
     fun clearStreamsForTab(tabId: String) {
-        val currentMap = _tabStreams.value.toMutableMap()
-        currentMap[tabId] = emptyList()
-        _tabStreams.value = currentMap
+        _tabStreams.update { current ->
+            current.toMutableMap().apply { put(tabId, emptyList()) }
+        }
     }
 
     private fun addDiscoveredStream(tabId: String, stream: DetectedStream) {
-        val currentMap = _tabStreams.value.toMutableMap()
-        val list = currentMap[tabId]?.toMutableList() ?: mutableListOf()
-        if (list.none { it.originalUrl == stream.originalUrl }) {
-            list.add(stream)
-            currentMap[tabId] = list
-            _tabStreams.value = currentMap
+        _tabStreams.update { current ->
+            if (!activeViews.containsKey(tabId)) return@update current
+            val currentList = current[tabId] ?: emptyList()
+            if (currentList.any { it.originalUrl == stream.originalUrl }) {
+                current
+            } else {
+                current.toMutableMap().apply {
+                    put(tabId, currentList + stream)
+                }
+            }
         }
     }
 

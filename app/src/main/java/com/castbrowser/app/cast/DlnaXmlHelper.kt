@@ -5,14 +5,26 @@ object DlnaXmlHelper {
     fun buildSetAvTransportUriXml(
         mediaUri: String,
         title: String,
-        mimeType: String = "video/mp4"
+        mimeType: String = "video/mp4",
+        subtitleUrl: String? = null
     ): String {
+        val subtitleMetadata = if (!subtitleUrl.isNullOrBlank()) {
+            val subMime = if (subtitleUrl.endsWith(".vtt", ignoreCase = true)) "text/vtt" else "text/srt"
+            val subType = if (subtitleUrl.endsWith(".vtt", ignoreCase = true)) "vtt" else "srt"
+            """
+&lt;res protocolInfo="http-get:*:${escapeXml(subMime)}:*"&gt;${escapeXml(subtitleUrl)}&lt;/res&gt;
+&lt;sec:CaptionInfo xmlns:sec="http://www.sec.org/dlna" sec:type="${escapeXml(subType)}"&gt;${escapeXml(subtitleUrl)}&lt;/sec:CaptionInfo&gt;
+&lt;sec:CaptionInfoEx xmlns:sec="http://www.sec.org/dlna" sec:type="${escapeXml(subType)}"&gt;${escapeXml(subtitleUrl)}&lt;/sec:CaptionInfoEx&gt;
+            """.trimIndent()
+        } else ""
+
         val didlMetadata = """
-&lt;DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/"&gt;
+&lt;DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" xmlns:sec="http://www.sec.org/dlna"&gt;
 &lt;item id="0" parentID="-1" restricted="1"&gt;
 &lt;dc:title&gt;${escapeXml(title)}&lt;/dc:title&gt;
 &lt;upnp:class&gt;object.item.videoItem&lt;/upnp:class&gt;
 &lt;res protocolInfo="http-get:*:${escapeXml(mimeType)}:*"&gt;${escapeXml(mediaUri)}&lt;/res&gt;
+$subtitleMetadata
 &lt;/item&gt;
 &lt;/DIDL-Lite&gt;
         """.trimIndent()
@@ -96,7 +108,7 @@ object DlnaXmlHelper {
         val h = seconds / 3600
         val m = (seconds % 3600) / 60
         val s = seconds % 60
-        return String.format("%02d:%02d:%02d", h, m, s)
+        return String.format(java.util.Locale.US, "%02d:%02d:%02d", h, m, s)
     }
 
     fun parseRelTimeToSeconds(timeStr: String): Long {

@@ -27,6 +27,12 @@ class CastWebViewClient(
 
     private val clientScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private val emptyResponse = WebResourceResponse("text/plain", "UTF-8", ByteArrayInputStream(ByteArray(0)))
+    private val probedUrls = java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap<String, Boolean>())
+
+    fun destroy() {
+        clientScope.cancel()
+        probedUrls.clear()
+    }
 
     override fun shouldInterceptRequest(
         view: WebView?,
@@ -39,8 +45,8 @@ class CastWebViewClient(
             return emptyResponse
         }
 
-        // 2. Check Video Stream Candidate
-        if (StreamClassifier.isPotentialStreamUrl(url)) {
+        // 2. Check Video Stream Candidate (with dedup)
+        if (StreamClassifier.isPotentialStreamUrl(url) && probedUrls.add(url)) {
             val headers = request.requestHeaders ?: emptyMap()
             val cookie = CookieManager.getInstance().getCookie(url)
 
@@ -69,6 +75,7 @@ class CastWebViewClient(
 
     override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
         super.onPageStarted(view, url, favicon)
+        probedUrls.clear()
         url?.let {
             onUrlChanged(it)
             onPageStartedCallback(it)
@@ -102,7 +109,7 @@ class CastWebViewClient(
             val type = json.optString("type")
             if (type == "STREAM_CANDIDATE") {
                 val url = json.optString("url")
-                if (StreamClassifier.isPotentialStreamUrl(url)) {
+                if (StreamClassifier.isPotentialStreamUrl(url) && probedUrls.add(url)) {
                     val cookie = CookieManager.getInstance().getCookie(url)
                     clientScope.launch {
                         val probed = probeService.probeStream(url, emptyMap(), cookie)

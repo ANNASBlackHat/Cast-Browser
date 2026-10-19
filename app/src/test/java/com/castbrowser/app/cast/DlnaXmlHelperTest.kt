@@ -33,4 +33,17 @@ class DlnaXmlHelperTest {
         val seekXml = DlnaXmlHelper.buildSeekXml(120) // 2 minutes
         assertTrue(seekXml.contains("<Target>00:02:00</Target>"))
     }
+
+    @Test
+    fun testBuildSetAvTransportUriXmlWithSubtitles() {
+        val xml = DlnaXmlHelper.buildSetAvTransportUriXml(
+            mediaUri = "http://192.168.1.10:8888/video.mp4",
+            title = "Movie",
+            mimeType = "video/mp4",
+            subtitleUrl = "http://192.168.1.10:8888/subs.vtt"
+        )
+        assertTrue(xml.contains("http://192.168.1.10:8888/subs.vtt"))
+        assertTrue(xml.contains("protocolInfo=\"http-get:*:text/vtt:*\""))
+        assertTrue(xml.contains("sec:CaptionInfo"))
+    }
 }

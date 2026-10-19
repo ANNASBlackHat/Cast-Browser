@@ -29,6 +29,7 @@ class CastForegroundService : Service() {
         const val CHANNEL_ID = "cast_playback_channel"
         const val NOTIFICATION_ID = 1001
 
+        const val ACTION_START_CAST = "com.castbrowser.app.ACTION_START_CAST"
         const val ACTION_PLAY = "com.castbrowser.app.ACTION_PLAY"
         const val ACTION_PAUSE = "com.castbrowser.app.ACTION_PAUSE"
         const val ACTION_STOP = "com.castbrowser.app.ACTION_STOP"
@@ -42,10 +43,72 @@ class CastForegroundService : Service() {
         @Volatile
         var activeProxyInstance: LocalStreamProxy? = null
             private set
+
+        @Volatile
+        var activeServiceInstance: CastForegroundService? = null
+            private set
+
+        private val _currentStatus = kotlinx.coroutines.flow.MutableStateFlow<PlaybackStatus?>(null)
+        val currentStatus: kotlinx.coroutines.flow.StateFlow<PlaybackStatus?> = _currentStatus
+
+        @Volatile
+        private var pendingParams: CastSessionParams? = null
+
+        fun startCast(
+            context: Context,
+            controller: CastController,
+            media: CastMedia,
+            pageUrl: String,
+            proxy: LocalStreamProxy?,
+            startMs: Long,
+            repository: AppRepository
+        ) {
+            pendingParams = CastSessionParams(
+                controller = controller,
+                media = media,
+                pageUrl = pageUrl,
+                proxy = proxy,
+                startMs = startMs,
+                repository = repository
+            )
+            val intent = Intent(context, CastForegroundService::class.java).apply {
+                action = ACTION_START_CAST
+            }
+            androidx.core.content.ContextCompat.startForegroundService(context, intent)
+        }
+
+        fun stopCast(context: Context) {
+            val intent = Intent(context, CastForegroundService::class.java).apply {
+                action = ACTION_STOP
+            }
+            context.startService(intent)
+        }
+
+        fun setSubtitle(subtitleUrl: String) {
+            val service = activeServiceInstance ?: return
+            val controller = activeControllerInstance ?: return
+            val currentMedia = service.activeMedia ?: return
+            val currentPos = _currentStatus.value?.positionMs ?: 0L
+            val updated = currentMedia.copy(subtitleUrl = subtitleUrl.ifBlank { null })
+            service.activeMedia = updated
+            service.serviceScope.launch {
+                controller.load(updated, currentPos)
+            }
+        }
     }
+
+    data class CastSessionParams(
+        val controller: CastController,
+        val media: CastMedia,
+        val pageUrl: String,
+        val proxy: LocalStreamProxy?,
+        val startMs: Long,
+        val repository: AppRepository
+    )
 
     override fun onCreate() {
         super.onCreate()
+        activeServiceInstance = this
         createNotificationChannel()
         setupMediaSession()
     }
@@ -54,6 +117,15 @@ class CastForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
+            ACTION_START_CAST -> {
+                val params = pendingParams
+                pendingParams = null
+                if (params != null) {
+                    startCastingInternal(params)
+                } else if (activeMedia == null) {
+                    stopSelf()
+                }
+            }
             ACTION_PLAY -> serviceScope.launch { castController?.play() }
             ACTION_PAUSE -> serviceScope.launch { castController?.pause() }
             ACTION_STOP -> {
@@ -78,39 +150,41 @@ class CastForegroundService : Service() {
         return START_NOT_STICKY
     }
 
-    fun startCasting(
-        controller: CastController,
-        media: CastMedia,
-        pageUrl: String,
-        proxy: LocalStreamProxy?,
-        startMs: Long,
-        repository: AppRepository
-    ) {
-        castController = controller
-        activeControllerInstance = controller
-        proxyServer = proxy
-        activeProxyInstance = proxy
-        activeMedia = media
-        activePageUrl = pageUrl
+    private fun startCastingInternal(params: CastSessionParams) {
+        // H7: Release previous controller & cancel its polling loop
+        castController?.release()
+        castController = params.controller
+        activeControllerInstance = params.controller
 
-        val notification = buildNotification("Connecting to TV...", media.title, PlaybackState.BUFFERING)
+        // C5: Stop previous proxy if any
+        try {
+            proxyServer?.stop()
+        } catch (_: Exception) {}
+        proxyServer = params.proxy
+        activeProxyInstance = params.proxy
+
+        activeMedia = params.media
+        activePageUrl = params.pageUrl
+
+        val notification = buildNotification("Connecting to TV...", params.media.title, PlaybackState.BUFFERING)
         startForeground(NOTIFICATION_ID, notification)
 
         serviceScope.launch {
-            controller.load(media, startMs)
+            params.controller.load(params.media, params.startMs)
 
             // Collect playback status and update notification & database
-            controller.status.collectLatest { status ->
-                updateNotification(media.title, status)
+            params.controller.status.collectLatest { status ->
+                _currentStatus.value = status
+                updateNotification(params.media.title, status)
                 updateMediaSessionState(status)
 
                 // Persist watch progress to database
                 if (status.durationMs > 0 && activePageUrl != null) {
-                    val host = try { java.net.URI(pageUrl).host ?: "" } catch (_: Exception) { "" }
-                    val parsed = EpisodeTitleParser.parse(media.title, pageUrl)
+                    val host = try { java.net.URI(params.pageUrl).host ?: "" } catch (_: Exception) { "" }
+                    val parsed = EpisodeTitleParser.parse(params.media.title, params.pageUrl)
 
-                    repository.recordOrUpdateWatch(
-                        pageUrl = pageUrl,
+                    params.repository.recordOrUpdateWatch(
+                        pageUrl = params.pageUrl,
                         title = parsed.title,
                         host = host,
                         seriesKey = parsed.seriesKey,
@@ -269,11 +343,18 @@ class CastForegroundService : Service() {
         super.onDestroy()
         serviceScope.cancel()
         mediaSession?.release()
-        activeControllerInstance?.release()
+        mediaSession = null
+        castController?.release()
+        castController = null
         activeControllerInstance = null
+        _currentStatus.value = null
         try {
             proxyServer?.stop()
         } catch (_: Exception) {}
+        proxyServer = null
         activeProxyInstance = null
+        if (activeServiceInstance == this) {
+            activeServiceInstance = null
+        }
     }
 }

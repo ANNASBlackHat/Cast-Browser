@@ -45,7 +45,9 @@ fun BrowserScreen(
     onPauseCast: () -> Unit,
     onStopCast: () -> Unit,
     onSeekCast: (Long) -> Unit,
+    onSetSubtitle: ((String) -> Unit)? = null,
     onUrlNavigated: (String) -> Unit,
+    onTitleUpdated: (String) -> Unit = {},
     tabCount: Int = 1
 ) {
     var isEditingUrl by remember { mutableStateOf(false) }
@@ -66,8 +68,8 @@ fun BrowserScreen(
 
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
 
-    // Intercept system back press: go back in WebView history first!
-    androidx.activity.compose.BackHandler(enabled = true) {
+    // H5 Fix: only intercept back press if URL bar is open or WebView can go back
+    androidx.activity.compose.BackHandler(enabled = isEditingUrl || webViewInstance?.canGoBack() == true) {
         if (isEditingUrl) {
             isEditingUrl = false
         } else if (webViewInstance?.canGoBack() == true) {
@@ -75,10 +77,14 @@ fun BrowserScreen(
         }
     }
 
-    LaunchedEffect(castingPlaybackStatus) {
-        if (castingPlaybackStatus != null && !showRemoteSheet) {
+    // H1 Fix: Only auto-open remote sheet when casting transitions from inactive to active
+    var wasCasting by remember { mutableStateOf(false) }
+    LaunchedEffect(castingPlaybackStatus != null) {
+        val isNowCasting = castingPlaybackStatus != null
+        if (isNowCasting && !wasCasting) {
             showRemoteSheet = true
         }
+        wasCasting = isNowCasting
     }
 
     Scaffold(
@@ -207,6 +213,7 @@ fun BrowserScreen(
                         showRemoteSheet = false
                     },
                     onSeek = onSeekCast,
+                    onSetSubtitle = onSetSubtitle,
                     onDismiss = { showRemoteSheet = false }
                 )
             }
@@ -217,25 +224,35 @@ fun BrowserScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            AndroidView(
-                factory = { _ ->
-                    webViewPool.getOrCreateWebView(
-                        tabId = currentTabId,
-                        initialUrl = initialTabUrl,
-                        isIncognito = false,
-                        onTitleUpdate = { title ->
-                            currentDisplayTitle = title
-                        },
-                        onUrlUpdate = { updatedUrl ->
-                            currentDisplayUrl = updatedUrl
-                            onUrlNavigated(updatedUrl)
+            key(currentTabId) {
+                AndroidView(
+                    factory = { _ ->
+                        webViewPool.getOrCreateWebView(
+                            tabId = currentTabId,
+                            initialUrl = initialTabUrl,
+                            isIncognito = false,
+                            onTitleUpdate = { title ->
+                                currentDisplayTitle = title
+                                onTitleUpdated(title)
+                            },
+                            onUrlUpdate = { updatedUrl ->
+                                currentDisplayUrl = updatedUrl
+                                onUrlNavigated(updatedUrl)
+                            }
+                        ).also {
+                            webViewInstance = it
                         }
-                    ).also {
-                        webViewInstance = it
-                    }
-                },
-                modifier = Modifier.fillMaxSize()
-            )
+                    },
+                    update = { webView ->
+                        webViewInstance = webView
+                        val targetUrl = activeTab?.url
+                        if (!targetUrl.isNullOrBlank() && webView.url != targetUrl && targetUrl != "about:blank") {
+                            webView.loadUrl(targetUrl)
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
 
             // Chrome-style URL edit dropdown overlay
             if (isEditingUrl) {

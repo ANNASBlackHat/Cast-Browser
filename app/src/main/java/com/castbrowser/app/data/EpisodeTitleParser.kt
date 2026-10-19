@@ -32,7 +32,7 @@ object EpisodeTitleParser {
         }
 
         // Try S02E05
-        S_E_REGEX.find(rawTitle)?.let { match ->
+        S_E_REGEX.find(cleanTitle)?.let { match ->
             val season = match.groupValues[1].toIntOrNull()
             val episode = match.groupValues[2].toIntOrNull()
             val seriesTitle = extractSeriesTitle(cleanTitle, match.range)
@@ -45,7 +45,7 @@ object EpisodeTitleParser {
         }
 
         // Try 2x05
-        X_REGEX.find(rawTitle)?.let { match ->
+        X_REGEX.find(cleanTitle)?.let { match ->
             val season = match.groupValues[1].toIntOrNull()
             val episode = match.groupValues[2].toIntOrNull()
             val seriesTitle = extractSeriesTitle(cleanTitle, match.range)
@@ -58,7 +58,7 @@ object EpisodeTitleParser {
         }
 
         // Try Season X Episode Y
-        SEASON_EPISODE_TEXT_REGEX.find(rawTitle)?.let { match ->
+        SEASON_EPISODE_TEXT_REGEX.find(cleanTitle)?.let { match ->
             val season = match.groupValues[1].toIntOrNull()
             val episode = match.groupValues[2].toIntOrNull()
             val seriesTitle = extractSeriesTitle(cleanTitle, match.range)
@@ -71,11 +71,11 @@ object EpisodeTitleParser {
         }
 
         // Try Episode only from title or URL
-        val epMatch = EPISODE_ONLY_REGEX.find(rawTitle) ?: EPISODE_ONLY_REGEX.find(url)
+        val epMatch = EPISODE_ONLY_REGEX.find(cleanTitle) ?: EPISODE_ONLY_REGEX.find(url)
         if (epMatch != null) {
             val epStr = epMatch.groupValues[1].ifEmpty { epMatch.groupValues[2] }
             val episode = epStr.toIntOrNull()
-            val seriesTitle = if (rawTitle.contains(epMatch.value)) {
+            val seriesTitle = if (cleanTitle.contains(epMatch.value)) {
                 extractSeriesTitle(cleanTitle, epMatch.range)
             } else {
                 cleanTitle
@@ -101,7 +101,8 @@ object EpisodeTitleParser {
         val prefix = cleanTitle.substring(0, matchRange.first.coerceAtMost(cleanTitle.length))
             .trim(' ', '-', '–', ':', '|', ',')
         if (prefix.isNotBlank()) return prefix
-        val suffix = cleanTitle.substring(matchRange.last.coerceAtMost(cleanTitle.length))
+        val suffixStartIndex = (matchRange.last + 1).coerceAtMost(cleanTitle.length)
+        val suffix = cleanTitle.substring(suffixStartIndex)
             .trim(' ', '-', '–', ':', '|', ',')
         return suffix.ifBlank { cleanTitle }
     }

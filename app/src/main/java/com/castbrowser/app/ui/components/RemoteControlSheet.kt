@@ -2,7 +2,7 @@ package com.castbrowser.app.ui.components
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -18,8 +18,48 @@ fun RemoteControlSheet(
     onPause: () -> Unit,
     onStop: () -> Unit,
     onSeek: (Long) -> Unit,
+    onSetSubtitle: ((String) -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
+    var showSubtitleDialog by remember { mutableStateOf(false) }
+    var subtitleInput by remember { mutableStateOf("") }
+
+    if (showSubtitleDialog) {
+        AlertDialog(
+            onDismissRequest = { showSubtitleDialog = false },
+            title = { Text("Load Subtitle") },
+            text = {
+                Column {
+                    Text(
+                        text = "Enter direct URL to a WebVTT (.vtt) or SubRip (.srt) file:",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = subtitleInput,
+                        onValueChange = { subtitleInput = it },
+                        placeholder = { Text("https://example.com/sub.vtt") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    onSetSubtitle?.invoke(subtitleInput.trim())
+                    showSubtitleDialog = false
+                }) {
+                    Text("Apply")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSubtitleDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -43,8 +83,15 @@ fun RemoteControlSheet(
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary
                 )
-                TextButton(onClick = onDismiss) {
-                    Text("Hide")
+                Row {
+                    if (onSetSubtitle != null) {
+                        TextButton(onClick = { showSubtitleDialog = true }) {
+                            Text("Subtitles")
+                        }
+                    }
+                    TextButton(onClick = onDismiss) {
+                        Text("Hide")
+                    }
                 }
             }
 
@@ -63,10 +110,21 @@ fun RemoteControlSheet(
 
             if (durationSec > 0) {
                 val progressFraction = (positionSec.toFloat() / durationSec.toFloat()).coerceIn(0f, 1f)
+                var isDragging by remember { mutableStateOf(false) }
+                var dragFraction by remember { mutableFloatStateOf(0f) }
+
+                val currentFraction = if (isDragging) dragFraction else progressFraction
+                val displayPositionSec = if (isDragging) (dragFraction * durationSec).toLong() else positionSec
+
                 Slider(
-                    value = progressFraction,
+                    value = currentFraction,
                     onValueChange = { frac ->
-                        onSeek((frac * durationSec * 1000L).toLong())
+                        isDragging = true
+                        dragFraction = frac
+                    },
+                    onValueChangeFinished = {
+                        isDragging = false
+                        onSeek((dragFraction * durationSec * 1000L).toLong())
                     },
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -76,7 +134,7 @@ fun RemoteControlSheet(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = DlnaXmlHelper.formatRelTime(positionSec),
+                        text = DlnaXmlHelper.formatRelTime(displayPositionSec),
                         style = MaterialTheme.typography.bodySmall
                     )
                     Text(

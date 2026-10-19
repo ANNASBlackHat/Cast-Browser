@@ -61,4 +61,27 @@ class EpisodeTitleParserTest {
         assertNull(result.episode)
         assertEquals("Inception (2010)", result.title)
     }
+
+    @Test
+    fun testParsePrefixEpisodeFormatDoesNotLeakLastCharIntoSuffix() {
+        // e.g. S01E01 - Pilot Episode
+        val result = EpisodeTitleParser.parse(
+            rawTitle = "S01E01 - Pilot Episode - Watch Online Free HD",
+            url = "https://example.com/s01e01"
+        )
+        assertEquals("Pilot Episode", result.seriesKey)
+        assertEquals(1, result.season)
+        assertEquals(1, result.episode)
+    }
+
+    @Test
+    fun testParseTitleWithMultipleJunkTagsAndPrefixes() {
+        val result = EpisodeTitleParser.parse(
+            rawTitle = "The Bear 2x04 Honeydew | Stream HD",
+            url = "https://example.com/watch/the-bear-2x04"
+        )
+        assertEquals("The Bear", result.seriesKey)
+        assertEquals(2, result.season)
+        assertEquals(4, result.episode)
+    }
 }

@@ -21,14 +21,11 @@ class DlnaDiscoveryService(
     private val multicastAddress = "239.255.255.250"
     private val multicastPort = 1900
 
-    private val searchMessage = """
-M-SEARCH * HTTP/1.1
-HOST: 239.255.255.250:1900
-MAN: "ssdp:discover"
-MX: 3
-ST: urn:schemas-upnp-org:service:AVTransport:1
-
-""".replace("\n", "\r\n")
+    private val searchMessage = "M-SEARCH * HTTP/1.1\r\n" +
+            "HOST: 239.255.255.250:1900\r\n" +
+            "MAN: \"ssdp:discover\"\r\n" +
+            "MX: 3\r\n" +
+            "ST: urn:schemas-upnp-org:service:AVTransport:1\r\n\r\n"
 
     suspend fun discoverDevices(timeoutMs: Int = 3000): List<DlnaDevice> = withContext(Dispatchers.IO) {
         val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
@@ -39,12 +36,13 @@ ST: urn:schemas-upnp-org:service:AVTransport:1
 
         val discovered = mutableListOf<DlnaDevice>()
         val locationUrls = mutableSetOf<String>()
+        var socket: DatagramSocket? = null
 
         try {
-            val socket = DatagramSocket()
+            socket = DatagramSocket()
             socket.soTimeout = timeoutMs
 
-            val sendData = searchMessage.toByteArray()
+            val sendData = searchMessage.toByteArray(Charsets.UTF_8)
             val sendPacket = DatagramPacket(
                 sendData,
                 sendData.size,
@@ -68,17 +66,26 @@ ST: urn:schemas-upnp-org:service:AVTransport:1
                     break
                 }
             }
-            socket.close()
 
-            // Fetch device XML descriptions
+            // Fetch device XML descriptions and deduplicate by id
+            val seenIds = mutableSetOf<String>()
             for (loc in locationUrls) {
                 fetchDeviceDescription(loc)?.let { device ->
-                    discovered.add(device)
+                    if (seenIds.add(device.id)) {
+                        discovered.add(device)
+                    }
                 }
             }
         } catch (_: Exception) {
         } finally {
-            multicastLock?.release()
+            try {
+                socket?.close()
+            } catch (_: Exception) {}
+            try {
+                if (multicastLock?.isHeld == true) {
+                    multicastLock.release()
+                }
+            } catch (_: Exception) {}
         }
 
         return@withContext discovered

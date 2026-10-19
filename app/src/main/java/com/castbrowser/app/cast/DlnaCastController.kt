@@ -38,7 +38,8 @@ class DlnaCastController(
         val setUriSoap = DlnaXmlHelper.buildSetAvTransportUriXml(
             mediaUri = media.url,
             title = media.title,
-            mimeType = media.mimeType
+            mimeType = media.mimeType,
+            subtitleUrl = media.subtitleUrl
         )
         val success = sendSoapAction("SetAVTransportURI", setUriSoap)
         if (success) {
