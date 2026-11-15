@@ -11,6 +11,10 @@ class AdBlockEngineTest {
         assertTrue(AdBlockEngine.isAdOrTracker("https://doubleclick.net/pagead/ads?client=ca-pub-123"))
         assertTrue(AdBlockEngine.isAdOrTracker("https://adservice.google.com/adsid/google/ui"))
         assertTrue(AdBlockEngine.isAdOrTracker("https://subdomain.popads.net/serve.js"))
+        assertTrue(AdBlockEngine.isAdOrTracker("https://onclickpredictiv.com/jump/next.php"))
+        assertTrue(AdBlockEngine.isAdOrTracker("https://popunder.trafficnetwork.com/open"))
+        assertTrue(AdBlockEngine.isAdOrTracker("intent://scan/#Intent;scheme=zxing;package=com.google.zxing.client.android;end"))
+        assertTrue(AdBlockEngine.isAdOrTracker("market://details?id=com.fake.ad"))
     }
 
     @Test

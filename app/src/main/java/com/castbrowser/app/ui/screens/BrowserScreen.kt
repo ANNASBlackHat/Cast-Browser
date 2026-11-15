@@ -26,6 +26,7 @@ import com.castbrowser.app.detect.DetectedStream
 import com.castbrowser.app.ui.components.DevicePickerSheet
 import com.castbrowser.app.ui.components.RemoteControlSheet
 import com.castbrowser.app.ui.components.VideoDetectionSheet
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -45,11 +46,16 @@ fun BrowserScreen(
     onPauseCast: () -> Unit,
     onStopCast: () -> Unit,
     onSeekCast: (Long) -> Unit,
+    onSeekByCast: ((Long) -> Unit)? = null,
     onSetSubtitle: ((String) -> Unit)? = null,
     onUrlNavigated: (String) -> Unit,
     onTitleUpdated: (String) -> Unit = {},
+    onOpenInNewTab: (String) -> Unit = {},
     tabCount: Int = 1
 ) {
+    val coroutineScope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
+
     var isEditingUrl by remember { mutableStateOf(false) }
     var editUrlText by remember { mutableStateOf("") }
 
@@ -88,6 +94,7 @@ fun BrowserScreen(
     }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
@@ -203,9 +210,16 @@ fun BrowserScreen(
         },
         bottomBar = {
             if (showRemoteSheet && castingPlaybackStatus != null) {
+                val allSubtitles = remember(discoveredStreams, selectedStreamToCast) {
+                    val streamSubs = selectedStreamToCast?.subtitles ?: emptyList()
+                    if (streamSubs.isNotEmpty()) streamSubs
+                    else discoveredStreams.flatMap { it.subtitles }.distinctBy { it.url }
+                }
+
                 RemoteControlSheet(
                     title = selectedStreamToCast?.title ?: "Playing on TV",
                     status = castingPlaybackStatus,
+                    detectedSubtitles = allSubtitles,
                     onPlay = onPlayCast,
                     onPause = onPauseCast,
                     onStop = {
@@ -213,6 +227,7 @@ fun BrowserScreen(
                         showRemoteSheet = false
                     },
                     onSeek = onSeekCast,
+                    onSeekBy = onSeekByCast,
                     onSetSubtitle = onSetSubtitle,
                     onDismiss = { showRemoteSheet = false }
                 )
@@ -238,6 +253,23 @@ fun BrowserScreen(
                             onUrlUpdate = { updatedUrl ->
                                 currentDisplayUrl = updatedUrl
                                 onUrlNavigated(updatedUrl)
+                            },
+                            onPopupBlocked = { blockedUrl ->
+                                coroutineScope.launch {
+                                    val domain = try {
+                                        android.net.Uri.parse(blockedUrl).host?.removePrefix("www.") ?: blockedUrl
+                                    } catch (_: Exception) {
+                                        blockedUrl
+                                    }
+                                    val result = snackbarHostState.showSnackbar(
+                                        message = "Popup blocked: $domain",
+                                        actionLabel = "Open in new tab",
+                                        duration = SnackbarDuration.Short
+                                    )
+                                    if (result == SnackbarResult.ActionPerformed) {
+                                        onOpenInNewTab(blockedUrl)
+                                    }
+                                }
                             }
                         ).also {
                             webViewInstance = it

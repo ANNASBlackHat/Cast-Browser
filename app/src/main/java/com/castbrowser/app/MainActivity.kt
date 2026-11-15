@@ -139,17 +139,28 @@ class MainActivity : ComponentActivity() {
                                     val controller = DlnaCastController(device)
                                     var playUrl = stream.originalUrl
                                     var proxyServer: LocalStreamProxy? = null
+                                    val phoneIp = getLocalIpAddress() ?: "127.0.0.1"
+
+                                    val defaultSub = stream.subtitles.firstOrNull()
+                                    var subProxyUrl: String? = null
+
+                                    // Always start proxy if stream needs proxy OR if we have subtitles or might serve subtitles
+                                    val proxy = LocalStreamProxy(8888)
+                                    try {
+                                        proxy.start()
+                                    } catch (_: Exception) {}
+                                    proxyServer = proxy
+
+                                    if (defaultSub != null) {
+                                        val subToken = UUID.randomUUID().toString()
+                                        proxy.registerSubtitle(subToken, defaultSub.url, stream.headers)
+                                        subProxyUrl = "http://$phoneIp:8888/sub/$subToken.srt"
+                                    }
 
                                     if (stream.deliveryMode == DeliveryMode.NEEDS_PROXY) {
-                                        val proxy = LocalStreamProxy(8888)
-                                        try {
-                                            proxy.start()
-                                        } catch (_: Exception) {}
-                                        val token = proxy.registerStream(stream.headers, stream.cookies)
+                                        val token = proxy.registerStream(stream.headers, stream.cookies, subProxyUrl)
                                         val encoded = URLEncoder.encode(stream.originalUrl, "UTF-8")
-                                        val phoneIp = getLocalIpAddress() ?: "127.0.0.1"
                                         playUrl = "http://$phoneIp:8888/proxy?token=$token&url=$encoded"
-                                        proxyServer = proxy
                                     }
 
                                     val pageUrl = activeTab.url
@@ -161,7 +172,8 @@ class MainActivity : ComponentActivity() {
                                     val castMedia = CastMedia(
                                         url = playUrl,
                                         title = stream.title,
-                                        mimeType = stream.mimeType ?: "video/mp4"
+                                        mimeType = stream.mimeType ?: "video/mp4",
+                                        subtitleUrl = subProxyUrl
                                     )
 
                                     CastForegroundService.startCast(
@@ -170,6 +182,8 @@ class MainActivity : ComponentActivity() {
                                         media = castMedia,
                                         pageUrl = pageUrl,
                                         proxy = proxyServer,
+                                        phoneIp = phoneIp,
+                                        proxyPort = 8888,
                                         startMs = startMs,
                                         repository = container.repository
                                     )
@@ -187,6 +201,9 @@ class MainActivity : ComponentActivity() {
                         },
                         onSeekCast = { pos ->
                             scope.launch { CastForegroundService.activeControllerInstance?.seekTo(pos) }
+                        },
+                        onSeekByCast = { delta ->
+                            scope.launch { CastForegroundService.activeControllerInstance?.seekBy(delta) }
                         },
                         onSetSubtitle = { subUrl ->
                             CastForegroundService.setSubtitle(subUrl)
@@ -210,6 +227,23 @@ class MainActivity : ComponentActivity() {
                                         container.repository.saveTab(current.copy(title = newTitle))
                                     }
                                 }
+                            }
+                        },
+                        onOpenInNewTab = { popupUrl ->
+                            val newId = UUID.randomUUID().toString()
+                            val newTab = TabEntity(
+                                id = newId,
+                                url = popupUrl,
+                                title = "New Tab",
+                                position = tabs.size,
+                                isActive = true,
+                                isIncognito = false,
+                                lastAccessedAt = System.currentTimeMillis()
+                            )
+                            scope.launch {
+                                container.repository.saveTab(newTab)
+                                container.repository.setActiveTab(newId)
+                                activeTabId = newId
                             }
                         },
                         tabCount = tabs.size

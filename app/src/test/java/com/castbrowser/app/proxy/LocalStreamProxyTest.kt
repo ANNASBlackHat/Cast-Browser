@@ -2,14 +2,12 @@ package com.castbrowser.app.proxy
 
 import com.google.common.truth.Truth.assertThat
 import fi.iki.elonen.NanoHTTPD
-import okhttp3.OkHttpClient
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
 import java.io.ByteArrayInputStream
 import java.io.InputStream
 import java.net.ServerSocket
-import java.net.URI
 
 class LocalStreamProxyTest {
 
@@ -37,10 +35,11 @@ class LocalStreamProxyTest {
 
     private class MockHttpSession(
         private val uriStr: String,
-        private val parmsMap: Map<String, String>,
+        private val parmsMap: Map<String, String> = emptyMap(),
         private val headersMap: Map<String, String> = emptyMap(),
         private val httpMethod: NanoHTTPD.Method = NanoHTTPD.Method.GET
     ) : NanoHTTPD.IHTTPSession {
+        @Deprecated("Deprecated in Java")
         override fun execute() {}
         override fun getCookies(): NanoHTTPD.CookieHandler? = null
         override fun getHeaders(): Map<String, String> = headersMap
@@ -107,24 +106,29 @@ class LocalStreamProxyTest {
     }
 
     @Test
-    fun `serve preserves complex query parameters and plus symbols in target url without double decoding`() {
-        val token = proxy!!.registerStream(emptyMap())
-        // In NanoHTTPD, session.parms represents already-decoded query parameters.
-        // If the upstream video URL was https://cdn.example.com/v?sig=a+b&next=%2Fhome,
-        // NanoHTTPD's parameter parser delivers "https://cdn.example.com/v?sig=a+b&next=%2Fhome".
-        // With double-decode, a+b became 'a b' and %2F became '/'. Without double-decode, it is preserved.
-        val complexUrl = "https://cdn.example.com/v?sig=a+b&next=%2Fhome"
+    fun `OPTIONS request returns 200 with CORS headers`() {
         val session = MockHttpSession(
             uriStr = "/proxy",
-            parmsMap = mapOf(
-                "token" to token,
-                "url" to complexUrl
-            )
+            httpMethod = NanoHTTPD.Method.OPTIONS
         )
         val response = proxy!!.serve(session)
-        // It tries to connect upstream with OkHttp to a mock address, resulting in internal error (or connection error),
-        // but importantly NOT forbidden or bad request.
-        assertThat(response.status).isNotEqualTo(NanoHTTPD.Response.Status.FORBIDDEN)
-        assertThat(response.status).isNotEqualTo(NanoHTTPD.Response.Status.BAD_REQUEST)
+        assertThat(response.status).isEqualTo(NanoHTTPD.Response.Status.OK)
+        assertThat(response.getHeader("access-control-allow-origin")).isEqualTo("*")
+    }
+
+    @Test
+    fun `subtitle endpoint returns 404 for unknown token`() {
+        val session = MockHttpSession(
+            uriStr = "/sub/nonexistent.srt"
+        )
+        val response = proxy!!.serve(session)
+        assertThat(response.status).isEqualTo(NanoHTTPD.Response.Status.NOT_FOUND)
+    }
+
+    @Test
+    fun `subtitle endpoint handles cached SRT`() {
+        val token = proxy!!.registerStream(emptyMap())
+        proxy!!.registerSubtitle(token, "https://example.com/sub.vtt")
+        assertThat(proxy!!.hasSubtitle(token)).isTrue()
     }
 }

@@ -1,6 +1,9 @@
 package com.castbrowser.app.ui.components
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -9,15 +12,18 @@ import androidx.compose.ui.unit.dp
 import com.castbrowser.app.cast.DlnaXmlHelper
 import com.castbrowser.app.cast.PlaybackState
 import com.castbrowser.app.cast.PlaybackStatus
+import com.castbrowser.app.detect.DetectedSubtitle
 
 @Composable
 fun RemoteControlSheet(
     title: String,
     status: PlaybackStatus,
+    detectedSubtitles: List<DetectedSubtitle> = emptyList(),
     onPlay: () -> Unit,
     onPause: () -> Unit,
     onStop: () -> Unit,
     onSeek: (Long) -> Unit,
+    onSeekBy: ((Long) -> Unit)? = null,
     onSetSubtitle: ((String) -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
@@ -27,18 +33,80 @@ fun RemoteControlSheet(
     if (showSubtitleDialog) {
         AlertDialog(
             onDismissRequest = { showSubtitleDialog = false },
-            title = { Text("Load Subtitle") },
+            title = { Text("Select Subtitles") },
             text = {
-                Column {
+                Column(modifier = Modifier.fillMaxWidth()) {
                     Text(
-                        text = "Enter direct URL to a WebVTT (.vtt) or SubRip (.srt) file:",
-                        style = MaterialTheme.typography.bodySmall
+                        text = "Subtitles are applied on TV. Choose a detected track or enter a custom URL:",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    if (detectedSubtitles.isNotEmpty()) {
+                        Text(
+                            text = "Detected Tracks",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 160.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            item {
+                                Surface(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            onSetSubtitle?.invoke("")
+                                            showSubtitleDialog = false
+                                        },
+                                    color = MaterialTheme.colorScheme.surfaceVariant,
+                                    shape = MaterialTheme.shapes.small
+                                ) {
+                                    Text(
+                                        text = "None (Turn Off Subtitles)",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        modifier = Modifier.padding(8.dp)
+                                    )
+                                }
+                            }
+                            items(detectedSubtitles) { sub ->
+                                val labelText = if (sub.language.isNullOrBlank()) sub.label else "${sub.label} (${sub.language})"
+                                Surface(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            onSetSubtitle?.invoke(sub.url)
+                                            showSubtitleDialog = false
+                                        },
+                                    color = MaterialTheme.colorScheme.surfaceVariant,
+                                    shape = MaterialTheme.shapes.small
+                                ) {
+                                    Text(
+                                        text = labelText,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        modifier = Modifier.padding(8.dp)
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                    }
+
+                    Text(
+                        text = "Custom Subtitle URL (.srt / .vtt / .ass):",
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
                     OutlinedTextField(
                         value = subtitleInput,
                         onValueChange = { subtitleInput = it },
-                        placeholder = { Text("https://example.com/sub.vtt") },
+                        placeholder = { Text("https://example.com/subs.srt") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -46,7 +114,9 @@ fun RemoteControlSheet(
             },
             confirmButton = {
                 Button(onClick = {
-                    onSetSubtitle?.invoke(subtitleInput.trim())
+                    if (subtitleInput.isNotBlank()) {
+                        onSetSubtitle?.invoke(subtitleInput.trim())
+                    }
                     showSubtitleDialog = false
                 }) {
                     Text("Apply")
@@ -118,6 +188,7 @@ fun RemoteControlSheet(
 
                 Slider(
                     value = currentFraction,
+                    enabled = status.canSeek,
                     onValueChange = { frac ->
                         isDragging = true
                         dragFraction = frac
@@ -152,13 +223,28 @@ fun RemoteControlSheet(
                 Spacer(modifier = Modifier.height(12.dp))
             }
 
+            if (!status.canSeek) {
+                Text(
+                    text = "Seeking is not supported for this stream (live or non-seekable)",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
             // Controls
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Button(onClick = { onSeek((status.positionMs - 10_000L).coerceAtLeast(0L)) }) {
+                Button(
+                    onClick = {
+                        if (onSeekBy != null) onSeekBy(-10_000L)
+                        else onSeek((status.positionMs - 10_000L).coerceAtLeast(0L))
+                    },
+                    enabled = status.canSeek
+                ) {
                     Text("-10s")
                 }
 
@@ -172,7 +258,13 @@ fun RemoteControlSheet(
                     }
                 }
 
-                Button(onClick = { onSeek(status.positionMs + 10_000L) }) {
+                Button(
+                    onClick = {
+                        if (onSeekBy != null) onSeekBy(10_000L)
+                        else onSeek(status.positionMs + 10_000L)
+                    },
+                    enabled = status.canSeek
+                ) {
                     Text("+10s")
                 }
 

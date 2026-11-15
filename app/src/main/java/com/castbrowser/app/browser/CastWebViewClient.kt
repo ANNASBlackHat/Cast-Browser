@@ -3,14 +3,11 @@ package com.castbrowser.app.browser
 import android.content.Context
 import android.graphics.Bitmap
 import android.webkit.*
-import androidx.webkit.WebViewCompat
-import androidx.webkit.WebViewFeature
 import com.castbrowser.app.detect.DetectedStream
+import com.castbrowser.app.detect.DetectedSubtitle
 import com.castbrowser.app.detect.StreamClassifier
 import com.castbrowser.app.detect.StreamProbeService
 import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
 
@@ -22,7 +19,8 @@ class CastWebViewClient(
     private val onPageTitleChanged: (String) -> Unit,
     private val onUrlChanged: (String) -> Unit,
     private val onPageStartedCallback: (String) -> Unit = {},
-    private val onStreamDiscovered: (DetectedStream) -> Unit
+    private val onStreamDiscovered: (DetectedStream) -> Unit,
+    private val onSubtitleDiscovered: (DetectedSubtitle) -> Unit = {}
 ) : WebViewClient() {
 
     private val clientScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -45,7 +43,14 @@ class CastWebViewClient(
             return emptyResponse
         }
 
-        // 2. Check Video Stream Candidate (with dedup)
+        // 2. Check Subtitle tracks (.vtt, .srt, .ass, .ssa)
+        val cleanUrl = url.substringBefore("?").lowercase()
+        if (cleanUrl.endsWith(".vtt") || cleanUrl.endsWith(".srt") || cleanUrl.endsWith(".ass") || cleanUrl.endsWith(".ssa")) {
+            val fileName = url.substringBefore("?").substringAfterLast("/").ifBlank { "Subtitle" }
+            onSubtitleDiscovered(DetectedSubtitle(url = url, label = fileName))
+        }
+
+        // 3. Check Video Stream Candidate (with dedup)
         if (StreamClassifier.isPotentialStreamUrl(url) && probedUrls.add(url)) {
             val headers = request.requestHeaders ?: emptyMap()
             val cookie = CookieManager.getInstance().getCookie(url)
@@ -117,6 +122,13 @@ class CastWebViewClient(
                             onStreamDiscovered(probed)
                         }
                     }
+                }
+            } else if (type == "SUBTITLE_CANDIDATE") {
+                val subUrl = json.optString("url")
+                val label = json.optString("label").ifBlank { "Subtitle" }
+                val lang = json.optString("language").ifBlank { null }
+                if (subUrl.isNotBlank()) {
+                    onSubtitleDiscovered(DetectedSubtitle(url = subUrl, label = label, language = lang))
                 }
             }
         } catch (_: Exception) {}

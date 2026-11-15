@@ -24,6 +24,8 @@ class CastForegroundService : Service() {
     private var castController: CastController? = null
     private var activeMedia: CastMedia? = null
     private var activePageUrl: String? = null
+    private var activePhoneIp: String = "127.0.0.1"
+    private var activeProxyPort: Int = 8888
 
     companion object {
         const val CHANNEL_ID = "cast_playback_channel"
@@ -60,6 +62,8 @@ class CastForegroundService : Service() {
             media: CastMedia,
             pageUrl: String,
             proxy: LocalStreamProxy?,
+            phoneIp: String = "127.0.0.1",
+            proxyPort: Int = 8888,
             startMs: Long,
             repository: AppRepository
         ) {
@@ -68,6 +72,8 @@ class CastForegroundService : Service() {
                 media = media,
                 pageUrl = pageUrl,
                 proxy = proxy,
+                phoneIp = phoneIp,
+                proxyPort = proxyPort,
                 startMs = startMs,
                 repository = repository
             )
@@ -89,7 +95,20 @@ class CastForegroundService : Service() {
             val controller = activeControllerInstance ?: return
             val currentMedia = service.activeMedia ?: return
             val currentPos = _currentStatus.value?.positionMs ?: 0L
-            val updated = currentMedia.copy(subtitleUrl = subtitleUrl.ifBlank { null })
+
+            var finalSubUrl: String? = null
+            if (subtitleUrl.isNotBlank()) {
+                val proxy = service.proxyServer
+                if (proxy != null) {
+                    val token = java.util.UUID.randomUUID().toString()
+                    proxy.registerSubtitle(token, subtitleUrl)
+                    finalSubUrl = "http://${service.activePhoneIp}:${service.activeProxyPort}/sub/$token.srt"
+                } else {
+                    finalSubUrl = subtitleUrl
+                }
+            }
+
+            val updated = currentMedia.copy(subtitleUrl = finalSubUrl)
             service.activeMedia = updated
             service.serviceScope.launch {
                 controller.load(updated, currentPos)
@@ -102,6 +121,8 @@ class CastForegroundService : Service() {
         val media: CastMedia,
         val pageUrl: String,
         val proxy: LocalStreamProxy?,
+        val phoneIp: String = "127.0.0.1",
+        val proxyPort: Int = 8888,
         val startMs: Long,
         val repository: AppRepository
     )
@@ -136,14 +157,12 @@ class CastForegroundService : Service() {
             }
             ACTION_SEEK_FORWARD -> {
                 serviceScope.launch {
-                    val current = castController?.status?.value?.positionMs ?: 0L
-                    castController?.seekTo(current + 10_000L)
+                    castController?.seekBy(10_000L)
                 }
             }
             ACTION_SEEK_REWIND -> {
                 serviceScope.launch {
-                    val current = castController?.status?.value?.positionMs ?: 0L
-                    castController?.seekTo((current - 10_000L).coerceAtLeast(0L))
+                    castController?.seekBy(-10_000L)
                 }
             }
         }
@@ -162,6 +181,11 @@ class CastForegroundService : Service() {
         } catch (_: Exception) {}
         proxyServer = params.proxy
         activeProxyInstance = params.proxy
+
+        activeMedia = params.media
+        activePageUrl = params.pageUrl
+        activePhoneIp = params.phoneIp
+        activeProxyPort = params.proxyPort
 
         activeMedia = params.media
         activePageUrl = params.pageUrl

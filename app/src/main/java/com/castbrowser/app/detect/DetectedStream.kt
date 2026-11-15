@@ -20,6 +20,12 @@ data class StreamQuality(
     val url: String
 )
 
+data class DetectedSubtitle(
+    val url: String,
+    val label: String,
+    val language: String? = null
+)
+
 data class DetectedStream(
     val id: String = java.util.UUID.randomUUID().toString(),
     val originalUrl: String,
@@ -32,6 +38,7 @@ data class DetectedStream(
     val isDrmProtected: Boolean = false,
     val drmReason: String? = null,
     val qualities: List<StreamQuality> = emptyList(),
+    val subtitles: List<DetectedSubtitle> = emptyList(),
     val durationSeconds: Long? = null,
     val fileSizeBytes: Long? = null,
     val discoveredAt: Long = System.currentTimeMillis()

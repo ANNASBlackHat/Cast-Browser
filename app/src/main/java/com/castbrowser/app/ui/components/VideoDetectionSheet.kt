@@ -77,6 +77,14 @@ fun VideoDetectionSheet(
                                     style = MaterialTheme.typography.bodyMedium,
                                     maxLines = 2
                                 )
+                                if (stream.subtitles.isNotEmpty()) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = "💬 Subtitles detected (${stream.subtitles.size})",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.tertiary
+                                    )
+                                }
                                 if (stream.isDrmProtected) {
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text(
